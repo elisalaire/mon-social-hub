@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabaseClient'
 import confetti from 'canvas-confetti'
@@ -14,7 +15,7 @@ function App() {
   const [selectedDay, setSelectedDay] = useState(null); 
   const [events, setEvents] = useState([]);
   const [readComments, setReadComments] = useState(JSON.parse(localStorage.getItem('read-comments')) || {});
-  const [activeEvent, setActiveEvent] = useState(null); // Pour la carte flottante
+  const [activeEvent, setActiveEvent] = useState(null);
   
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('social-hub-profile')) || { 
     name: "", 
@@ -58,7 +59,7 @@ function App() {
   // --- ACTIONS ---
   const handleHype = async (e) => {
     await supabase.from('events').update({ hype: (e.hype || 0) + 1 }).eq('id', e.id);
-    confetti({ particleCount: 40, spread: 70, origin: { y: 0.8 } });
+    confetti({ particleCount: 40, spread: 70, origin: { y: 0.8 }, colors: ['#D1FF4B', '#FF2E95'] });
   };
 
   const handleJoin = async (event) => {
@@ -73,8 +74,16 @@ function App() {
     if (!commentInput.trim() || !user.name) return;
     const newComment = { user: user.name, avatar: user.avatar, text: commentInput, time: format(new Date(), 'HH:mm') };
     const updatedComments = [...(event.comments || []), newComment];
-    await supabase.from('events').update({ comments: updatedComments, last_comment_at: new Date().toISOString() }).eq('id', event.id);
+    
+    // Optimistic UI update
+    setActiveEvent({ ...event, comments: updatedComments });
     setCommentInput("");
+
+    await supabase.from('events').update({ 
+      comments: updatedComments, 
+      last_comment_at: new Date().toISOString() 
+    }).eq('id', event.id);
+    
     setReadComments(prev => ({ ...prev, [event.id]: updatedComments.length }));
   };
 
@@ -83,6 +92,13 @@ function App() {
     if (editingEventId) await supabase.from('events').update(data).eq('id', editingEventId);
     else await supabase.from('events').insert([{ ...data, attendees: [{ name: user.name, avatar: user.avatar }] }]);
     setSelectedDay(null); setEditingEventId(null); setSelectedGif(null);
+    setForm({ title: "", price: "", location: "", description: "", recap_url: "" });
+  };
+
+  const searchGiphy = async (q) => {
+    setGifSearch(q); if (q.length < 2) return;
+    const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${q}&limit=6`);
+    const { data } = await res.json(); setGifResults(data);
   };
 
   return (
@@ -93,21 +109,18 @@ function App() {
         <h1 className="text-2xl font-black text-[#D1FF4B] italic tracking-tighter shadow-neon uppercase">Social Hub</h1>
         <div onClick={() => setIsEditingProfile(true)} className="flex items-center gap-3 bg-white/5 p-1 pr-4 rounded-full cursor-pointer hover:border-[#FF2E95] border border-transparent transition-all">
           <img src={user.avatar} className="w-8 h-8 rounded-full border border-white/10" alt="avatar" />
-          <span className="text-[10px] font-black uppercase tracking-widest">{user.name || "Set Profile"}</span>
+          <span className="text-[10px] font-black uppercase tracking-widest">{user.name || "Set Identity"}</span>
         </div>
       </header>
 
       {/* FULL CALENDAR VIEW */}
       <main className="flex-1 flex flex-col p-4 md:p-6 overflow-hidden">
-        
-        {/* Navigation */}
         <div className="flex items-center justify-between mb-4 bg-white/5 p-3 rounded-2xl border border-white/5">
           <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="text-[#00F0FF] text-xl font-black px-4">◀</button>
           <h2 className="text-xl font-black uppercase italic text-[#D1FF4B] tracking-widest">{format(currentMonth, 'MMMM yyyy')}</h2>
           <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="text-[#00F0FF] text-xl font-black px-4">▶</button>
         </div>
 
-        {/* Grid */}
         <div className="flex-1 grid grid-cols-7 gap-1 border border-white/5 rounded-3xl overflow-hidden bg-white/5">
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
             <div key={d} className="bg-[#1a0b2e] p-2 text-center text-[9px] font-black opacity-30 uppercase tracking-[0.2em]">{d}</div>
@@ -121,27 +134,31 @@ function App() {
             const isToday = isSameDay(day, new Date());
 
             return (
-              <div 
-                key={i} 
+              <div key={i} 
                 onClick={() => isCurrent && (dayEvents.length > 0 ? setActiveEvent(dayEvents[0]) : setSelectedDay(day))}
                 className={`relative min-h-0 p-2 border-[0.5px] border-white/5 transition-all flex flex-col gap-1 ${isCurrent ? 'bg-[#0e021f] hover:bg-white/5 cursor-pointer' : 'bg-black/20 opacity-20 pointer-events-none'} ${isToday ? 'ring-1 ring-inset ring-[#D1FF4B]' : ''}`}
               >
                 <span className={`text-[10px] font-black ${isToday ? 'text-[#D1FF4B]' : 'opacity-20'}`}>{format(day, 'd')}</span>
-                
-                {/* Event Labels in Calendar */}
                 <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
                   {dayEvents.map(e => {
                     const unread = (e.comments?.length || 0) - (readComments[e.id] || 0);
                     return (
-                      <div 
-                        key={e.id} 
-                        onClick={(e_stop) => { e_stop.stopPropagation(); setActiveEvent(e); }}
-                        className="bg-[#FF2E95] text-[8px] font-black p-1.5 rounded-lg truncate uppercase shadow-lg flex items-center justify-between"
+                      <div key={e.id} 
+                        onClick={(ev) => { ev.stopPropagation(); setActiveEvent(e); }}
+                        className="bg-[#FF2E95] hover:bg-[#ff4d9d] text-[8px] font-black p-1.5 rounded-xl truncate uppercase shadow-lg transition-all group"
                       >
-                        <span className="truncate">{e.title}</span>
-                        <div className="flex gap-1 shrink-0">
-                          {unread > 0 && <div className="w-2 h-2 bg-[#00F0FF] rounded-full animate-pulse" />}
-                          {e.hype > 10 && <span>⚡️</span>}
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="truncate pr-1">{e.title}</span>
+                          {unread > 0 && <div className="w-1.5 h-1.5 bg-[#00F0FF] rounded-full animate-pulse shrink-0" />}
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          <div className="flex -space-x-1.5">
+                            {(e.attendees || []).slice(0, 3).map((a, idx) => (
+                              <img key={idx} src={a.avatar} className="w-4 h-4 rounded-full border border-[#FF2E95] bg-[#1a0b2e]" />
+                            ))}
+                          </div>
+                          {(e.attendees || []).length > 3 && <span className="text-[6px] font-black ml-0.5">+{(e.attendees || []).length - 3}</span>}
+                          {e.hype > 10 && <span className="ml-auto text-[7px]">⚡️</span>}
                         </div>
                       </div>
                     )
@@ -153,60 +170,84 @@ function App() {
         </div>
       </main>
 
-      {/* FLOATING EVENT CARD (When an event is clicked) */}
+      {/* DETAILED FLOATING CARD */}
       {activeEvent && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#1a0b2e] border-2 border-[#D1FF4B] w-full max-w-4xl max-h-[90vh] rounded-[50px] overflow-hidden flex flex-col md:flex-row shadow-2xl animate-in zoom-in-95">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#1a0b2e] border-2 border-[#D1FF4B] w-full max-w-5xl max-h-[90vh] rounded-[50px] overflow-hidden flex flex-col md:flex-row shadow-2xl animate-in zoom-in-95">
             
-            {/* Left: Media & Info */}
-            <div className="md:w-1/2 relative h-64 md:h-auto border-r border-white/5 flex flex-col">
-              <img src={activeEvent.recap_url || activeEvent.gif_url || `https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=600`} className="absolute inset-0 w-full h-full object-cover opacity-40" />
-              <div className="relative z-10 p-8 flex flex-col h-full bg-gradient-to-t from-[#1a0b2e] via-transparent">
-                <button onClick={() => setActiveEvent(null)} className="self-start mb-auto bg-black/50 p-3 rounded-full hover:bg-white/10">✕</button>
-                <div className="mt-auto">
-                  <h3 className="text-4xl font-black uppercase tracking-tighter mb-2">{activeEvent.title}</h3>
-                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeEvent.location)}`} target="_blank" className="text-[#D1FF4B] font-black text-xs uppercase mb-6 block">📍 {activeEvent.location}</a>
-                  <div className="flex gap-4">
-                    <button onClick={() => handleJoin(activeEvent)} className="flex-1 bg-[#FF2E95] py-4 rounded-2xl font-black uppercase text-xs">
-                      {activeEvent.attendees?.[0]?.name === user.name ? 'You are Host' : activeEvent.attendees?.some(a => a.name === user.name) ? 'Leave' : 'Join Vibe'}
-                    </button>
-                    <button onClick={() => handleHype(activeEvent)} className="bg-white/10 px-6 rounded-2xl font-black">⚡️ {activeEvent.hype || 0}</button>
+            {/* Left: Info */}
+            <div className="md:w-1/2 relative h-80 md:h-auto border-r border-white/5 flex flex-col overflow-y-auto custom-scrollbar bg-[#0e021f]">
+              <div className="relative h-64 shrink-0">
+                <img src={activeEvent.recap_url || activeEvent.gif_url || `https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800`} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0e021f] to-transparent" />
+                <button onClick={() => setActiveEvent(null)} className="absolute top-6 left-6 bg-black/60 p-3 rounded-full hover:bg-white/20 transition-all">✕</button>
+                <div className="absolute bottom-6 left-8">
+                  <span className="bg-[#FF2E95] text-[10px] font-black px-3 py-1 rounded-full uppercase mb-2 inline-block shadow-lg">{activeEvent.price || 'Free Entry'}</span>
+                  <h3 className="text-4xl font-black uppercase tracking-tighter leading-none">{activeEvent.title}</h3>
+                </div>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/5 p-4 rounded-3xl border border-white/5">
+                    <p className="text-[10px] font-black uppercase opacity-40 mb-1 text-[#00F0FF]">When</p>
+                    <p className="text-sm font-bold">{format(new Date(activeEvent.date), 'EEEE, MMM do')}</p>
+                  </div>
+                  <div className="bg-white/5 p-4 rounded-3xl border border-white/5">
+                    <p className="text-[10px] font-black uppercase opacity-40 mb-1 text-[#00F0FF]">Where</p>
+                    <a href={`http://maps.google.com/?q=${encodeURIComponent(activeEvent.location)}`} target="_blank" className="text-sm font-bold hover:text-[#D1FF4B] truncate block">📍 {activeEvent.location}</a>
                   </div>
                 </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase opacity-40 mb-2">The Vibe</p>
+                  <p className="text-sm leading-relaxed text-white/80">{activeEvent.description || "No description provided."}</p>
+                </div>
+                <div className="flex items-center justify-between bg-white/5 p-4 rounded-3xl border border-white/5">
+                  <div>
+                    <p className="text-[10px] font-black uppercase opacity-40 mb-2">Crew ({activeEvent.attendees?.length || 0})</p>
+                    <div className="flex -space-x-3">
+                      {activeEvent.attendees?.map((a, i) => ( <img key={i} src={a.avatar} className="w-10 h-10 rounded-full border-4 border-[#0e021f]" /> ))}
+                    </div>
+                  </div>
+                  <button onClick={() => handleHype(activeEvent)} className="bg-[#D1FF4B] text-black px-4 py-2 rounded-2xl font-black flex items-center gap-2">⚡️ {activeEvent.hype || 0}</button>
+                </div>
+                <button onClick={() => handleJoin(activeEvent)} className={`w-full py-5 rounded-3xl font-black uppercase text-sm shadow-xl ${activeEvent.attendees?.some(a => a.name === user.name) ? 'bg-white/10' : 'bg-[#FF2E95]'}`}>
+                  {activeEvent.attendees?.[0]?.name === user.name ? 'You are Host 👑' : activeEvent.attendees?.some(a => a.name === user.name) ? 'Leave 🏃' : 'Join 🙋‍♂️'}
+                </button>
+                {activeEvent.attendees?.[0]?.name === user.name && (
+                   <button onClick={() => {setEditingEventId(activeEvent.id); setForm(activeEvent); setSelectedDay(new Date(activeEvent.date)); setSelectedGif(activeEvent.gif_url); setActiveEvent(null);}} className="w-full text-[10px] font-black opacity-20 uppercase tracking-[0.3em]">Edit Event</button>
+                )}
               </div>
             </div>
 
-            {/* Right: Chat Section */}
-            <div className="md:w-1/2 p-8 flex flex-col bg-[#0b0118]">
-              <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
-                <h4 className="text-xs font-black uppercase tracking-widest text-[#00F0FF]">Vibe Chat</h4>
-                <div className="flex -space-x-2">
-                   {activeEvent.attendees?.slice(0, 3).map((a, i) => <img key={i} src={a.avatar} className="w-6 h-6 rounded-full border-2 border-[#0b0118]" />)}
-                </div>
+            {/* Right: Chat */}
+            <div className="md:w-1/2 flex flex-col bg-[#0b0118]">
+              <div className="p-8 border-b border-white/5 flex justify-between items-center">
+                <h4 className="text-xs font-black uppercase tracking-[0.3em] text-[#00F0FF]">Vibe Chat</h4>
               </div>
-              
-              <div className="flex-1 overflow-y-auto space-y-4 mb-6 pr-2 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
                 {(activeEvent.comments || []).map((c, i) => (
-                  <div key={i} className={`flex gap-3 ${c.user === user.name ? 'flex-row-reverse' : ''}`}>
-                    <img src={c.avatar} className="w-8 h-8 rounded-full border border-white/10" />
-                    <div className={`p-3 rounded-2xl max-w-[80%] ${c.user === user.name ? 'bg-[#00F0FF] text-black rounded-tr-none' : 'bg-white/10 rounded-tl-none'}`}>
-                      <p className="text-[10px] font-bold mb-1">{c.text}</p>
-                      <p className="text-[7px] opacity-40 uppercase font-black">{c.user} • {c.time}</p>
+                  <div key={i} className={`flex gap-4 ${c.user === user.name ? 'flex-row-reverse' : ''}`}>
+                    <img src={c.avatar} className="w-10 h-10 rounded-full border-2 border-white/10 shrink-0" />
+                    <div className={`p-4 rounded-[28px] max-w-[85%] ${c.user === user.name ? 'bg-[#00F0FF] text-black rounded-tr-none' : 'bg-white/5 rounded-tl-none border border-white/10'}`}>
+                      <p className="text-[10px] font-black uppercase opacity-60 mb-2">{c.user}</p>
+                      <p className="text-sm font-bold leading-relaxed">{c.text}</p>
                     </div>
                   </div>
                 ))}
               </div>
-
-              <div className="flex gap-2 bg-white/5 p-2 rounded-2xl border border-white/10">
-                <input className="bg-transparent flex-1 px-4 font-bold outline-none text-xs" placeholder="Message..." value={commentInput} onChange={e => setCommentInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && postComment(activeEvent)} />
-                <button onClick={() => postComment(activeEvent)} className="bg-[#D1FF4B] text-black font-black px-6 py-3 rounded-xl uppercase text-[10px]">Send</button>
+              <div className="p-8 bg-[#1a0b2e]/50 backdrop-blur-md border-t border-white/5">
+                <div className="flex gap-3 bg-white/5 p-3 rounded-[30px] border border-white/10">
+                  <input className="bg-transparent flex-1 px-4 font-bold outline-none text-sm" placeholder="Send a vibe..." value={commentInput} onChange={e => setCommentInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && postComment(activeEvent)} />
+                  <button onClick={() => postComment(activeEvent)} className="bg-[#D1FF4B] text-black font-black p-4 px-8 rounded-[25px] uppercase text-[10px] tracking-widest">Send</button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Profile & Create Event Modals (Keep as before but match design) */}
+      {/* MODALS: CREATE & PROFILE */}
       {selectedDay && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center p-4">
           <div className="bg-[#1a0b2e] border-2 border-[#D1FF4B] p-8 rounded-[40px] w-full max-w-xl">
@@ -217,10 +258,17 @@ function App() {
                  <input className="input-field" placeholder="Price" value={form.price} onChange={e => setForm({...form, price: e.target.value})} />
                  <input className="input-field" placeholder="Location" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
                </div>
-               <textarea className="input-field h-24 resize-none" placeholder="Details..." value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
+               <textarea className="input-field h-24 resize-none" placeholder="Description..." value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
+               <div className="bg-white/5 p-4 rounded-[25px] space-y-4">
+                  <input className="input-field" placeholder="Search GIF theme..." onChange={e => searchGiphy(e.target.value)} />
+                  <div className="grid grid-cols-3 gap-2">
+                    {gifResults.map(g => <img key={g.id} src={g.images.fixed_height_small.url} onClick={() => setSelectedGif(g.images.fixed_height.url)} className={`h-16 w-full object-cover rounded-xl cursor-pointer border-2 ${selectedGif === g.images.fixed_height.url ? 'border-[#D1FF4B]' : 'border-transparent opacity-40'}`} />)}
+                  </div>
+               </div>
+               {editingEventId && <input className="input-field" placeholder="Recap Photo URL" value={form.recap_url} onChange={e => setForm({...form, recap_url: e.target.value})} />}
              </div>
-             <button onClick={handleSaveEvent} className="w-full bg-[#D1FF4B] text-black font-black py-5 rounded-[25px] uppercase tracking-widest">Create Event</button>
-             <button onClick={() => setSelectedDay(null)} className="w-full mt-4 text-[10px] opacity-30 uppercase font-black">Cancel</button>
+             <button onClick={handleSaveEvent} className="w-full bg-[#D1FF4B] text-black font-black py-5 rounded-[25px] uppercase tracking-widest">Broadcast Vibe</button>
+             <button onClick={() => setSelectedDay(null)} className="w-full mt-4 text-[10px] opacity-30 uppercase font-black text-center">Cancel</button>
           </div>
         </div>
       )}
