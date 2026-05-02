@@ -25,7 +25,7 @@ const searchGifs = async () => {
 
     try {
       // J'ai mis une nouvelle clé API ci-dessous
-      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=5Vf789G6K3L4M5N6P7Q8R9S0T1U2V3W4&q=${gifSearch}&limit=4`);
+      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=cfJQMO2KVjiYXYBYrTXFdwLHPpGKRFRj=${gifSearch}&limit=4`);
       const { data } = await res.json();
       
       if (data) {
