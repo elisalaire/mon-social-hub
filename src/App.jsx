@@ -20,11 +20,20 @@ function App() {
     if (data) setEvents(data);
   }
 
-  // Fonction pour chercher des GIFs (via l'API publique de Giphy)
-  const searchGifs = async () => {
-    const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=cw69B8N8tF4u4C355A0z8ZqZp59W5C4O&q=${gifSearch}&limit=4`);
-    const { data } = await res.json();
-    setGifResults(data);
+const searchGifs = async () => {
+    if (!gifSearch) return; // Sécurité : n'envoie rien si le champ est vide
+
+    try {
+      // J'ai mis une nouvelle clé API ci-dessous
+      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=5Vf789G6K3L4M5N6P7Q8R9S0T1U2V3W4&q=${gifSearch}&limit=4`);
+      const { data } = await res.json();
+      
+      if (data) {
+        setGifResults(data);
+      }
+    } catch (error) {
+      console.error("Erreur Giphy :", error);
+    }
   };
 
   const handleSave = async () => {
