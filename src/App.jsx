@@ -327,7 +327,7 @@ function App() {
         .input-field:focus { border-color: #00F0FF; background: rgba(255,255,255,0.06); }
       `}</style>
     </div>
-  
+  )
 }
 
 export default App
