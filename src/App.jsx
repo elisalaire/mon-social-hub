@@ -21,7 +21,7 @@ function App() {
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('social-hub-profile')) || { 
     name: "", 
     avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=Guest${Math.random()}`,
-    bio: "Vibe Curator ⚡️"
+    bio: "Ready to make moves ⚡️"
   });
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [activeChatEvent, setActiveChatEvent] = useState(null);
@@ -33,23 +33,30 @@ function App() {
   const [selectedGif, setSelectedGif] = useState(null);
   const [editingEventId, setEditingEventId] = useState(null);
 
-  // Leaderboard logic
-  const leaderboard = events.reduce((acc, event) => {
-      const host = event.attendees?.[0]?.name || "Unknown";
-      const hostAvatar = event.attendees?.[0]?.avatar;
-      const existing = acc.find(u => u.name === host);
-      if (existing) existing.score += (event.hype || 0);
-      else acc.push({ name: host, avatar: hostAvatar, score: (event.hype || 0) });
-      return acc;
-    }, []).sort((a, b) => b.score - a.score).slice(0, 3);
+  // --- Funny Status Logic ---
+  const getFunStatus = (joinedCount) => {
+    if (joinedCount === 0) return "Ghost 👻";
+    if (joinedCount < 3) return "Rookie Partyer 🐣";
+    if (joinedCount < 8) return "Vibe Master 🔥";
+    if (joinedCount < 15) return "Nightlife Legend 👑";
+    return "God of the Night 🌌";
+  };
+
+  const joinedCount = events.filter(e => e.attendees?.some(a => a.name === user.name)).length;
 
   useEffect(() => {
     localStorage.setItem('social-hub-profile', JSON.stringify(user));
     localStorage.setItem('read-comments', JSON.stringify(readComments));
     fetchEvents();
 
-    const channel = supabase.channel('harmony-hub')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => fetchEvents())
+    const channel = supabase.channel('party-hub')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, (payload) => {
+        if (payload.eventType === 'UPDATE' && payload.new.comments?.length > (payload.old?.comments?.length || 0)) {
+           const lastMsg = payload.new.comments[payload.new.comments.length - 1];
+           if (lastMsg.user !== user.name) setHasUnread(true);
+        }
+        fetchEvents();
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); }
   }, [currentMonth, user, readComments]);
@@ -60,6 +67,14 @@ function App() {
     const { data } = await supabase.from('events').select('*').gte('date', start).lte('date', end).order('date', { ascending: true });
     if (data) setEvents(data);
   }
+
+  const handleJoin = async (event) => {
+    if (!user.name) { setIsEditingProfile(true); return; }
+    const current = event.attendees || [];
+    const isJoined = current.some(a => a.name === user.name);
+    const updated = isJoined ? current.filter(a => a.name !== user.name) : [...current, { name: user.name, avatar: user.avatar }];
+    await supabase.from('events').update({ attendees: updated }).eq('id', event.id);
+  };
 
   const postComment = async (event) => {
     if (!commentInput.trim() || !user.name) return;
@@ -72,11 +87,10 @@ function App() {
   };
 
   const handleSaveEvent = async () => {
-    if (!form.title || !selectedDay) return;
     const eventData = { ...form, date: format(selectedDay, 'yyyy-MM-dd'), gif_url: selectedGif };
     if (editingEventId) await supabase.from('events').update(eventData).eq('id', editingEventId);
     else await supabase.from('events').insert([{ ...eventData, attendees: [{ name: user.name, avatar: user.avatar }] }]);
-    setSelectedDay(null); setEditingEventId(null); setForm({ title: "", price: "", location: "", description: "", recap_url: "" }); setSelectedGif(null);
+    setSelectedDay(null); setEditingEventId(null);
   };
 
   const searchGiphy = async (q) => {
@@ -86,37 +100,37 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0118] text-white font-sans p-4 md:p-10">
+    <div className="h-screen overflow-hidden bg-[#0b0118] text-white font-sans flex flex-col">
       
-      {/* HEADER & LEADERBOARD */}
-      <header className="max-w-7xl mx-auto mb-16 flex flex-col md:flex-row justify-between items-end gap-8">
+      {/* HEADER */}
+      <header className="p-6 md:px-12 flex justify-between items-center bg-[#0b0118]/80 backdrop-blur-xl border-b border-white/5 z-50">
         <div>
-          <h1 className="text-6xl font-black text-[#D1FF4B] italic tracking-tighter shadow-neon mb-4">SOCIAL HUB!</h1>
-          <div className="flex gap-3 bg-white/5 p-3 rounded-2xl border border-white/10">
-            <span className="text-[9px] font-black uppercase opacity-40 py-2">Hype Leaders:</span>
-            {leaderboard.map((u, i) => (
-              <div key={i} className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-full border border-white/5">
-                <img src={u.avatar} className="w-5 h-5 rounded-full" />
-                <span className="text-[10px] font-bold">{u.name} {i === 0 ? '👑' : ''}</span>
-              </div>
-            ))}
-          </div>
+          <h1 className="text-4xl font-black text-[#D1FF4B] italic tracking-tighter shadow-neon uppercase">Social Hub</h1>
+          <p className="text-[10px] font-bold text-[#FF2E95] uppercase tracking-[0.3em]">{getFunStatus(joinedCount)}</p>
         </div>
-        <div onClick={() => setIsEditingProfile(true)} className="bg-white/5 border border-white/10 p-2 pr-6 rounded-full flex items-center gap-4 cursor-pointer hover:border-[#FF2E95] transition-all">
-          <img src={user.avatar} className="w-10 h-10 rounded-full border border-white/10" />
-          <span className="font-black text-[11px] uppercase tracking-widest">{user.name || "Guest"}</span>
+        
+        <div className="flex items-center gap-4">
+          <div onClick={() => setIsEditingProfile(true)} className="bg-white/5 border border-white/10 p-1.5 pr-6 rounded-full flex items-center gap-3 cursor-pointer hover:border-[#FF2E95] transition-all">
+            <img src={user.avatar} className="w-10 h-10 rounded-full border border-white/10" alt="avatar" />
+            <span className="font-black text-[11px] uppercase tracking-tighter">{user.name || "Set Identity"}</span>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-10">
-        {/* CALENDAR SECTION */}
-        <div className="lg:col-span-3">
-          <div className="flex items-center justify-between mb-8 bg-white/5 p-6 rounded-[35px] border border-white/5">
-            <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="text-[#00F0FF] text-3xl font-black">◀</button>
-            <h2 className="text-3xl font-black uppercase italic text-[#D1FF4B]">{format(currentMonth, 'MMMM yyyy')}</h2>
-            <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="text-[#00F0FF] text-3xl font-black">▶</button>
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* LEFT: FIXED CALENDAR */}
+        <div className="hidden lg:flex w-[55%] flex-col p-10 border-r border-white/5">
+          <div className="flex items-center justify-between mb-10 bg-white/5 p-5 rounded-[30px] border border-white/5">
+            <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="text-[#00F0FF] text-2xl font-black px-4 hover:scale-125 transition-transform">◀</button>
+            <h2 className="text-3xl font-black uppercase italic text-[#D1FF4B] tracking-tighter">{format(currentMonth, 'MMMM yyyy')}</h2>
+            <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="text-[#00F0FF] text-2xl font-black px-4 hover:scale-125 transition-transform">▶</button>
           </div>
-          <div className="grid grid-cols-7 gap-3">
+
+          <div className="grid grid-cols-7 gap-4 h-full pb-6">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+              <div key={d} className="text-center text-[11px] font-black opacity-20 uppercase tracking-[0.2em]">{d}</div>
+            ))}
             {eachDayOfInterval({ 
               start: startOfWeek(startOfMonth(currentMonth), {weekStartsOn:1}), 
               end: endOfWeek(endOfMonth(currentMonth), {weekStartsOn:1}) 
@@ -124,137 +138,91 @@ function App() {
               const dayEvents = events.filter(e => isSameDay(new Date(e.date), day));
               const isCurrent = isSameMonth(day, currentMonth);
               return (
-                <div key={i} onClick={() => isCurrent && setSelectedDay(day)} className={`min-h-[110px] rounded-[25px] p-3 border transition-all ${isCurrent ? 'bg-white/5 border-white/10 cursor-pointer hover:border-[#FF2E95]' : 'opacity-0'}`}>
-                  <span className="text-[11px] font-black opacity-20">{format(day, 'd')}</span>
-                  <div className="flex flex-col gap-1 mt-2">{dayEvents.map(e => <div key={e.id} className="text-[7px] font-black bg-[#FF2E95] p-1 rounded uppercase truncate">{e.title}</div>)}</div>
+                <div key={i} onClick={() => isCurrent && setSelectedDay(day)} className={`relative rounded-[30px] border transition-all p-4 ${isCurrent ? 'bg-white/5 border-white/10 cursor-pointer hover:border-[#FF2E95] hover:bg-white/10' : 'opacity-0'}`}>
+                  <span className="text-[14px] font-black opacity-20">{format(day, 'd')}</span>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {dayEvents.map(e => <div key={e.id} className="w-2.5 h-2.5 rounded-full bg-[#FF2E95] shadow-[0_0_10px_#FF2E95]" />)}
+                  </div>
                 </div>
               )
             })}
           </div>
         </div>
 
-        {/* FEED SECTION - FIXED VIEW */}
-        <div className="space-y-6">
+        {/* RIGHT: SCROLLING FEED */}
+        <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-10 custom-scrollbar pb-32">
+          <h3 className="text-2xl font-black uppercase text-[#00F0FF] italic border-b border-white/10 pb-6 tracking-widest">Next Vibes</h3>
+          
+          {events.length === 0 && <p className="text-center py-20 opacity-20 italic font-black uppercase tracking-widest text-xs">Nothing planned yet...</p>}
+          
           {events.map(e => {
             const isPastEvent = isPast(new Date(e.date)) && !isSameDay(new Date(e.date), new Date());
             const unreadCount = (e.comments?.length || 0) - (readComments[e.id] || 0);
+            const isHost = e.attendees?.[0]?.name === user.name;
+            const isJoined = e.attendees?.some(a => a.name === user.name);
+            const displayImg = e.recap_url || e.gif_url || `https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=600`;
+
             return (
-              <div key={e.id} className={`bg-white/5 border-2 rounded-[45px] overflow-hidden relative group transition-all ${isPastEvent ? 'opacity-60 grayscale-[0.3]' : 'border-white/10 hover:border-[#D1FF4B]'}`}>
-                {/* Image Logic */}
-                <img src={isPastEvent && e.recap_url ? e.recap_url : e.gif_url} className="w-full h-44 object-cover opacity-80 group-hover:opacity-100" />
+              <div key={e.id} className={`bg-white/5 border-2 rounded-[60px] overflow-hidden group transition-all transform hover:-translate-y-2 ${isPastEvent ? 'opacity-40 grayscale' : 'border-white/10 hover:border-[#D1FF4B] shadow-2xl'}`}>
+                <div className="relative h-56">
+                  <img src={displayImg} className="w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity" alt="event" />
+                  {isHost && <div className="absolute top-8 left-8 bg-[#D1FF4B] text-black text-[10px] font-black px-4 py-2 rounded-full uppercase italic shadow-2xl">Host 👑</div>}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#0b0118] to-transparent opacity-90" />
+                </div>
                 
-                <div className="p-7">
-                  <div className="flex justify-between items-start mb-1">
-                    <h4 className="text-xl font-black uppercase tracking-tighter leading-tight">{e.title}</h4>
-                    <span className="text-[10px] font-black text-[#00F0FF]">{e.price || 'Free'}</span>
-                  </div>
-                  
-                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`} target="_blank" className="text-[9px] font-black text-[#D1FF4B] uppercase tracking-widest block mb-4 hover:underline">📍 {e.location}</a>
-                  
-                  <div className="flex justify-between items-center mb-6">
-                    <div className="flex -space-x-3">
-                      {e.attendees?.map((a, idx) => <img key={idx} src={a.avatar} className="w-9 h-9 rounded-full border-4 border-[#0b0118] bg-[#1a0b2e]" />)}
+                <div className="p-10 -mt-20 relative z-10">
+                  <div className="flex justify-between items-end mb-6">
+                    <div>
+                      <h4 className="text-4xl font-black uppercase tracking-tighter leading-none">{e.title}</h4>
+                      <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`} target="_blank" className="text-[11px] font-black text-[#D1FF4B] uppercase tracking-[0.2em] mt-3 block hover:underline">📍 {e.location}</a>
                     </div>
-                    <button onClick={() => supabase.from('events').update({ hype: (e.hype || 0) + 1 }).eq('id', e.id)} className="flex items-center gap-2 bg-white/5 p-2 px-3 rounded-full hover:bg-[#D1FF4B] hover:text-black transition-all">
-                      <span className="text-sm">⚡️</span>
-                      <span className="text-[10px] font-black">{e.hype || 0}</span>
+                    <span className="text-2xl font-black text-[#00F0FF]">{e.price || 'Free'}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center mb-8 bg-black/20 p-5 rounded-[30px] border border-white/5">
+                    <div className="flex -space-x-3">
+                      {e.attendees?.slice(0, 5).map((a, idx) => <img key={idx} src={a.avatar} className="w-12 h-12 rounded-full border-4 border-[#0b0118] bg-[#1a0b2e]" title={a.name} />)}
+                      {e.attendees?.length > 5 && <div className="w-12 h-12 rounded-full bg-white/10 border-4 border-[#0b0118] flex items-center justify-center text-xs font-black">+{e.attendees.length - 5}</div>}
+                    </div>
+                    <button onClick={() => supabase.from('events').update({ hype: (e.hype || 0) + 1 }).eq('id', e.id)} className="flex items-center gap-3 bg-white/10 p-3 px-5 rounded-full hover:bg-[#D1FF4B] hover:text-black transition-all shadow-xl">
+                      <span className="text-xl">⚡️</span>
+                      <span className="text-sm font-black">{e.hype || 0}</span>
                     </button>
                   </div>
 
-                  <div className="flex gap-2">
-                    <button onClick={() => {}} className="flex-1 bg-[#FF2E95] py-3.5 rounded-2xl text-[10px] font-black uppercase shadow-lg active:scale-95 transition-all">Join Vibe</button>
-                    <button onClick={() => {setActiveChatEvent(e); setReadComments(p => ({...p, [e.id]: e.comments?.length || 0}));}} className="relative bg-white/10 p-3.5 rounded-2xl text-xl hover:bg-[#00F0FF] transition-all">
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => !isHost && handleJoin(e)}
+                      disabled={isHost}
+                      className={`flex-1 py-5 rounded-[30px] text-xs font-black uppercase tracking-[0.2em] transition-all ${isHost ? 'bg-white/5 opacity-40 cursor-default' : isJoined ? 'bg-white/20 text-white' : 'bg-[#FF2E95] text-white shadow-[0_15px_30px_rgba(255,46,149,0.3)] active:scale-95'}`}
+                    >
+                      {isHost ? 'Hosting' : isJoined ? 'Leave Vibe' : 'Join the Vibe'}
+                    </button>
+                    <button onClick={() => setActiveChatEvent(e)} className="relative bg-white/10 p-5 rounded-[30px] text-3xl hover:bg-[#00F0FF] hover:text-black transition-all">
                       💬
-                      {unreadCount > 0 && <div className="absolute -top-1 -right-1 bg-[#FF2E95] text-[9px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-[#0b0118]">{unreadCount}</div>}
+                      {unreadCount > 0 && <div className="absolute -top-2 -right-2 bg-[#FF2E95] text-[10px] font-black w-7 h-7 rounded-full flex items-center justify-center border-2 border-[#0b0118] shadow-lg animate-bounce">{unreadCount}</div>}
                     </button>
                   </div>
-                  {e.attendees?.[0]?.name === user.name && (
-                    <button onClick={() => {setEditingEventId(e.id); setSelectedDay(new Date(e.date)); setForm(e); setSelectedGif(e.gif_url);}} className="w-full mt-4 text-[8px] font-black opacity-20 uppercase hover:opacity-100">Edit Settings</button>
+                  
+                  {isHost && (
+                    <button onClick={() => {setEditingEventId(e.id); setSelectedDay(new Date(e.date)); setForm(e); setSelectedGif(e.gif_url);}} className="w-full mt-8 text-[10px] font-black uppercase opacity-20 hover:opacity-100 tracking-[0.5em] transition-all">
+                      Edit Event
+                    </button>
                   )}
                 </div>
               </div>
             )
           })}
         </div>
-      </main>
+      </div>
 
-      {/* CHAT MODAL - FIXED UI */}
-      {activeChatEvent && (
-        <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl z-[800] flex items-center justify-center p-4">
-          <div className="bg-[#1a0b2e] border-2 border-[#00F0FF] p-8 rounded-[60px] w-full max-w-xl h-[85vh] flex flex-col shadow-2xl">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-2xl font-black uppercase italic text-[#00F0FF]">{activeChatEvent.title}</h3>
-              <button onClick={() => setActiveChatEvent(null)} className="text-white/40 font-black text-xs uppercase p-2">Close</button>
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-4 mb-8 pr-2 custom-scrollbar">
-              {(activeChatEvent.comments || []).map((c, i) => (
-                <div key={i} className={`flex gap-3 ${c.user === user.name ? 'flex-row-reverse' : ''}`}>
-                  <img src={c.avatar} className="w-8 h-8 rounded-full border border-white/10" />
-                  <div className={`p-4 rounded-[25px] max-w-[80%] ${c.user === user.name ? 'bg-[#00F0FF] text-black rounded-tr-none shadow-[0_10px_20px_rgba(0,240,255,0.2)]' : 'bg-white/5 rounded-tl-none border border-white/10'}`}>
-                    <p className="text-[8px] font-black uppercase opacity-60 mb-1">{c.user}</p>
-                    <p className="text-sm font-bold leading-tight">{c.text}</p>
-                    <p className="text-[7px] text-right mt-2 opacity-40">{c.time}</p>
-                  </div>
-                </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-            <div className="flex gap-2 bg-white/5 p-2 rounded-[25px] border border-white/10">
-              <input className="bg-transparent flex-1 px-4 font-bold outline-none text-sm" placeholder="Send a message..." value={commentInput} onChange={e => setCommentInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && postComment(activeChatEvent)} />
-              <button onClick={() => postComment(activeChatEvent)} className="bg-[#00F0FF] text-black font-black px-6 py-3 rounded-xl uppercase text-[10px] tracking-widest">Send</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL CREATE/EDIT - REINSTATED FIELDS */}
-      {selectedDay && (
-        <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[600] flex items-center justify-center p-4">
-          <div className="bg-[#1a0b2e] border-2 border-[#D1FF4B] p-10 rounded-[55px] w-full max-w-xl max-h-[90vh] overflow-y-auto">
-             <h3 className="text-3xl font-black mb-8 text-[#D1FF4B] uppercase italic text-center">{editingEventId ? "Update Vibe" : "Create New Vibe"}</h3>
-             <div className="space-y-5 mb-8">
-               <input className="input-field" placeholder="Event Name" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
-               <div className="grid grid-cols-2 gap-4">
-                 <input className="input-field" placeholder="Price (ex: 10€, Free)" value={form.price} onChange={e => setForm({...form, price: e.target.value})} />
-                 <input className="input-field" placeholder="Location (Address)" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
-               </div>
-               <textarea className="input-field h-24 resize-none" placeholder="Short description..." value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
-               
-               <div className="bg-white/5 p-5 rounded-[30px] border border-white/10">
-                 <p className="text-[9px] font-black uppercase text-[#00F0FF] mb-4 text-center tracking-widest">Visual Vibe (GIF Search)</p>
-                 <input className="input-field mb-4" placeholder="Type a theme (ex: Pool party)" value={gifSearch} onChange={e => searchGiphy(e.target.value)} />
-                 <div className="grid grid-cols-3 gap-2">
-                   {gifResults.map(g => <img key={g.id} src={g.images.fixed_height_small.url} onClick={() => setSelectedGif(g.images.fixed_height.url)} className={`h-16 w-full object-cover rounded-xl cursor-pointer border-2 transition-all ${selectedGif === g.images.fixed_height.url ? 'border-[#D1FF4B]' : 'border-transparent opacity-40'}`} />)}
-                 </div>
-               </div>
-
-               {editingEventId && (
-                 <div className="bg-[#FF2E95]/10 p-5 rounded-[30px] border border-[#FF2E95]/20">
-                   <p className="text-[9px] font-black uppercase text-[#FF2E95] mb-2 text-center tracking-widest">Memory Photo (Post-Event URL)</p>
-                   <input className="input-field" placeholder="https://..." value={form.recap_url} onChange={e => setForm({...form, recap_url: e.target.value})} />
-                 </div>
-               )}
-             </div>
-             <button onClick={handleSaveEvent} className="w-full bg-[#D1FF4B] text-black font-black py-5 rounded-[25px] uppercase tracking-widest text-lg shadow-xl hover:scale-95 transition-transform">Broadcast Vibe</button>
-             <button onClick={() => {setSelectedDay(null); setEditingEventId(null);}} className="w-full mt-4 text-[10px] opacity-20 uppercase font-black">Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {/* PROFILE MODAL */}
-      {isEditingProfile && (
-        <div className="fixed inset-0 bg-black/95 z-[900] flex items-center justify-center p-4">
-           <div className="bg-[#1a0b2e] border-2 border-[#D1FF4B] p-10 rounded-[55px] w-full max-w-sm">
-             <div className="flex flex-col items-center gap-8">
-                <img src={user.avatar} className="w-32 h-32 rounded-full border-4 border-[#FF2E95]" />
-                <input className="input-field text-center font-black uppercase" value={user.name} onChange={e => setUser({...user, name: e.target.value, avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${e.target.value}`})} />
-                <button onClick={() => setIsEditingProfile(false)} className="w-full bg-[#D1FF4B] text-black font-black py-5 rounded-[25px] uppercase tracking-widest">Save Identity</button>
-             </div>
-           </div>
-        </div>
-      )}
-
-      <style>{`.input-field { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 18px; font-weight: bold; outline: none; width: 100%; color: white; }.shadow-neon { text-shadow: 0 0 20px rgba(209,255,75,0.5); }.custom-scrollbar::-webkit-scrollbar { width: 5px; }.custom-scrollbar::-webkit-scrollbar-thumb { background: #00F0FF; border-radius: 10px; }`}</style>
+      <style>{`
+        .shadow-neon { text-shadow: 0 0 20px rgba(209,255,75,0.6); }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1a0b2e; border-radius: 20px; border: 2px solid #D1FF4B; }
+        .input-field { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 25px; padding: 20px; font-weight: bold; color: white; width: 100%; outline: none; }
+        .input-field:focus { border-color: #00F0FF; background: rgba(255,255,255,0.06); }
+      `}</style>
     </div>
   )
 }
