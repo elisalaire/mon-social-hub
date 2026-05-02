@@ -3,7 +3,7 @@ import { supabase } from './supabaseClient'
 import confetti from 'canvas-confetti'
 import { 
   format, addMonths, subMonths, startOfMonth, endOfMonth, 
-  eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isSameDay, isPast
+  eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isSameDay
 } from 'date-fns'
 
 const GIPHY_API_KEY = "cfJQMO2KVjiYXYBYrTXFdwLHPpGKRFRj";
@@ -28,16 +28,43 @@ function App() {
   const [gifSearch, setGifSearch] = useState("");
   const [gifResults, setGifResults] = useState([]);
   const [selectedGif, setSelectedGif] = useState(null);
-  const [editingEventId, setEditingEventId] = useState(null);
+
+  // --- LOGIQUE NOTIFICATIONS ---
+  useEffect(() => {
+    if ("Notification" in window) {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  const sendLocalNotification = (title, body) => {
+    if (Notification.permission === "granted") {
+      new Notification(title, { body, icon: "/vite.svg" });
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('social-hub-profile', JSON.stringify(user));
     localStorage.setItem('read-comments', JSON.stringify(readComments));
     fetchEvents();
 
-    const channel = supabase.channel('ultimate-hub-fixed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => fetchEvents())
+    const channel = supabase.channel('god-mode-hub')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' }, payload => {
+        sendLocalNotification("Nouveau Bail ! ⚡️", `${payload.new.title} vient d'être créé.`);
+        fetchEvents();
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'events' }, payload => {
+        // Notification si nouveau message
+        if (payload.new.comments?.length > payload.old.comments?.length) {
+          const lastMsg = payload.new.comments[payload.new.comments.length - 1];
+          if (lastMsg.user !== user.name) {
+            sendLocalNotification(`Message sur ${payload.new.title}`, `${lastMsg.user}: ${lastMsg.text}`);
+          }
+        }
+        fetchEvents();
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'events' }, () => fetchEvents())
       .subscribe();
+
     return () => { supabase.removeChannel(channel); }
   }, [currentMonth, user, readComments]);
 
@@ -70,10 +97,9 @@ function App() {
   };
 
   const deleteEvent = async (id) => {
-    if (!window.confirm("Delete this vibe forever?")) return;
+    if (!window.confirm("Supprimer ce bail ? 🗑️")) return;
     await supabase.from('events').delete().eq('id', id);
     setActiveEvent(null);
-    fetchEvents();
   };
 
   const postComment = async (event) => {
@@ -82,14 +108,12 @@ function App() {
     const updatedComments = [...(event.comments || []), newComment];
     await supabase.from('events').update({ comments: updatedComments, last_comment_at: new Date().toISOString() }).eq('id', event.id);
     setCommentInput("");
-    setReadComments(prev => ({ ...prev, [event.id]: updatedComments.length }));
   };
 
   const handleSaveEvent = async () => {
     const data = { ...form, date: format(selectedDay, 'yyyy-MM-dd'), gif_url: selectedGif };
-    if (editingEventId) await supabase.from('events').update(data).eq('id', editingEventId);
-    else await supabase.from('events').insert([{ ...data, attendees: [{ name: user.name, avatar: user.avatar }] }]);
-    setSelectedDay(null); setEditingEventId(null); setSelectedGif(null); setForm({ title: "", price: "", location: "", description: "", recap_url: "", time: "20:00" }); setGifResults([]);
+    await supabase.from('events').insert([{ ...data, attendees: [{ name: user.name, avatar: user.avatar }] }]);
+    setSelectedDay(null); setSelectedGif(null); setForm({ title: "", price: "", location: "", description: "", recap_url: "", time: "20:00" });
   };
 
   const searchGiphy = async (q) => {
@@ -126,7 +150,7 @@ function App() {
         </div>
 
         <div className="flex-1 grid grid-cols-7 gap-1.5 rounded-3xl overflow-hidden border border-white/5">
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+          {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(d => (
             <div key={d} className="bg-white/5 p-3 text-center text-[10px] font-black opacity-30 uppercase tracking-[0.3em]">{d}</div>
           ))}
           {eachDayOfInterval({ 
@@ -139,23 +163,31 @@ function App() {
 
             return (
               <div key={i} 
-                onClick={() => isCurrent && (dayEvents.length > 0 ? setActiveEvent(dayEvents[0]) : setSelectedDay(day))}
-                className={`relative min-h-0 p-3 border border-white/5 transition-all flex flex-col gap-2 ${isCurrent ? 'bg-white/5 hover:bg-white/10 cursor-pointer' : 'opacity-10 pointer-events-none'} ${isToday ? 'ring-1 ring-[#D1FF4B]' : ''}`}
+                className={`relative min-h-0 p-3 border border-white/5 transition-all flex flex-col gap-2 ${isCurrent ? 'bg-white/5 hover:bg-white/10' : 'opacity-10 pointer-events-none'} ${isToday ? 'ring-1 ring-[#D1FF4B]' : ''}`}
               >
-                <span className={`text-[11px] font-black ${isToday ? 'text-[#D1FF4B]' : 'opacity-30'}`}>{format(day, 'd')}</span>
-                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
+                <div className="flex justify-between items-start">
+                  <span className={`text-[11px] font-black ${isToday ? 'text-[#D1FF4B]' : 'opacity-30'}`}>{format(day, 'd')}</span>
+                  {isCurrent && (
+                    <button onClick={() => setSelectedDay(day)} className="text-[12px] opacity-0 group-hover:opacity-100 hover:text-[#D1FF4B] transition-all">+</button>
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar" onClick={() => isCurrent && dayEvents.length === 0 && setSelectedDay(day)}>
                   {dayEvents.map(e => (
                     <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setActiveEvent(e); }} 
-                      className={`p-2 rounded-xl text-[8px] font-black uppercase shadow-lg transition-all group ${e.hype > 15 ? 'bg-[#D1FF4B] text-black' : 'bg-[#FF2E95] text-white'}`}>
+                      className={`p-2 rounded-xl text-[8px] font-black uppercase shadow-lg transition-all cursor-pointer border border-white/10 ${e.hype > 15 ? 'bg-[#D1FF4B] text-black' : 'bg-[#FF2E95] text-white hover:scale-95'}`}>
                       <div className="truncate mb-1">{e.title}</div>
                       <div className="flex items-center gap-1">
                         <div className="flex -space-x-1.5 overflow-hidden">
-                          {e.attendees?.slice(0, 3).map((a, idx) => <img key={idx} src={a.avatar} className={`w-4 h-4 rounded-full border ${e.hype > 15 ? 'border-black/50' : 'border-[#FF2E95]'}`} alt="who" />)}
+                          {e.attendees?.slice(0, 3).map((a, idx) => <img key={idx} src={a.avatar} className="w-4 h-4 rounded-full border border-black/20" alt="crew" />)}
                         </div>
                         {((e.comments?.length || 0) - (readComments[e.id] || 0)) > 0 && <div className="w-1.5 h-1.5 bg-[#00F0FF] rounded-full animate-pulse ml-auto" />}
                       </div>
                     </div>
                   ))}
+                  {isCurrent && dayEvents.length > 0 && (
+                    <button onClick={(ev) => { ev.stopPropagation(); setSelectedDay(day); }} className="w-full py-1 border border-dashed border-white/10 rounded-lg text-[7px] font-black uppercase opacity-20 hover:opacity-100 transition-all">+ Nouveau</button>
+                  )}
                 </div>
               </div>
             )
@@ -167,38 +199,39 @@ function App() {
       {activeEvent && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[100] flex items-center justify-center p-4" onClick={() => setActiveEvent(null)}>
           <div className="bg-[#1a0b2e] border-2 border-white/10 w-full max-w-5xl h-[85vh] rounded-[50px] overflow-hidden flex flex-col md:flex-row shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            {/* Colonne gauche (Info) */}
             <div className="md:w-1/2 flex flex-col bg-[#0e021f] overflow-y-auto custom-scrollbar">
               <div className="relative h-72 shrink-0">
-                <img src={activeEvent.recap_url || activeEvent.gif_url || `https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?q=80&w=800`} className="w-full h-full object-cover" alt="vibe" />
+                <img src={activeEvent.gif_url || `https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?q=80&w=800`} className="w-full h-full object-cover" alt="vibe" />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#0e021f] to-transparent" />
                 <div className="absolute bottom-8 left-8 right-8">
                   <div className="flex justify-between items-end">
                     <div>
-                      <span className="bg-[#D1FF4B] text-black text-[10px] font-black px-3 py-1 rounded-full uppercase mb-2 inline-block tracking-widest">{activeEvent.price || 'Free'}</span>
+                      <span className="bg-[#D1FF4B] text-black text-[10px] font-black px-3 py-1 rounded-full uppercase mb-2 inline-block">{activeEvent.price || 'Gratuit'}</span>
                       <h3 className="text-5xl font-black uppercase tracking-tighter leading-none text-white">{activeEvent.title}</h3>
                     </div>
-                    <button onClick={() => addToCalendar(activeEvent)} className="bg-white/10 p-3 rounded-full hover:bg-[#00F0FF] transition-all" title="Add to Google Calendar">📅</button>
+                    <button onClick={() => addToCalendar(activeEvent)} className="bg-white/10 p-3 rounded-full hover:bg-[#00F0FF] transition-all">📅</button>
                   </div>
                 </div>
               </div>
               <div className="p-8 space-y-8">
                 <div className="flex gap-4">
-                  <div className="flex-1 bg-white/5 p-5 rounded-3xl border border-white/5 text-center"><p className="text-[9px] font-black uppercase opacity-40 text-[#00F0FF] mb-1 tracking-widest">Time</p><p className="text-lg font-black">{activeEvent.time || '20:00'}</p></div>
-                  <div className="flex-1 bg-white/5 p-5 rounded-3xl border border-white/5 text-center"><p className="text-[9px] font-black uppercase opacity-40 text-[#00F0FF] mb-1 tracking-widest">Place</p><a href={`http://googleusercontent.com/maps.google.com/3{encodeURIComponent(activeEvent.location)}`} target="_blank" className="text-sm font-black truncate block hover:text-[#D1FF4B]">📍 {activeEvent.location}</a></div>
+                  <div className="flex-1 bg-white/5 p-5 rounded-3xl border border-white/5 text-center"><p className="text-[9px] font-black uppercase opacity-40 text-[#00F0FF] mb-1">Heure</p><p className="text-lg font-black">{activeEvent.time}</p></div>
+                  <div className="flex-1 bg-white/5 p-5 rounded-3xl border border-white/5 text-center"><p className="text-[9px] font-black uppercase opacity-40 text-[#00F0FF] mb-1 text-center truncate">Lieu</p><p className="text-xs font-black truncate">📍 {activeEvent.location}</p></div>
                 </div>
-                <p className="text-white/60 leading-relaxed font-medium">{activeEvent.description || "No description provided."}</p>
+                <p className="text-white/60 leading-relaxed font-medium">{activeEvent.description}</p>
                 <div className="flex items-center justify-between bg-white/5 p-5 rounded-3xl border border-white/10">
-                  <div className="flex -space-x-3">{activeEvent.attendees?.map((a, i) => <img key={i} src={a.avatar} className="w-12 h-12 rounded-full border-4 border-[#0e021f] shadow-xl" alt="crew" />)}</div>
-                  <button onClick={() => handleHype(activeEvent)} className="bg-[#D1FF4B] text-black px-6 py-3 rounded-2xl font-black hover:scale-105 transition-all shadow-lg">⚡️ {activeEvent.hype || 0}</button>
+                  <div className="flex -space-x-3">{activeEvent.attendees?.map((a, i) => <img key={i} src={a.avatar} className="w-12 h-12 rounded-full border-4 border-[#0e021f]" alt="crew" />)}</div>
+                  <button onClick={() => handleHype(activeEvent)} className="bg-[#D1FF4B] text-black px-6 py-3 rounded-2xl font-black">⚡️ {activeEvent.hype || 0}</button>
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={() => handleJoin(activeEvent)} className={`flex-1 py-5 rounded-3xl font-black uppercase tracking-widest text-sm shadow-xl ${activeEvent.attendees?.some(a => a.name === user.name) ? 'bg-white/10 text-white' : 'bg-[#FF2E95] text-white hover:bg-[#ff4d9d]'}`}>{activeEvent.attendees?.[0]?.name === user.name ? 'Hosting 👑' : activeEvent.attendees?.some(a => a.name === user.name) ? 'Leave' : 'Join'}</button>
-                  {activeEvent.attendees?.[0]?.name === user.name && <button onClick={() => deleteEvent(activeEvent.id)} className="bg-red-500/20 text-red-500 p-5 rounded-3xl hover:bg-red-500 hover:text-white transition-all shadow-lg">🗑️</button>}
+                  <button onClick={() => handleJoin(activeEvent)} className={`flex-1 py-5 rounded-3xl font-black uppercase tracking-widest text-sm shadow-xl ${activeEvent.attendees?.some(a => a.name === user.name) ? 'bg-white/10 text-white' : 'bg-[#FF2E95] text-white hover:scale-105 transition-all'}`}>{activeEvent.attendees?.some(a => a.name === user.name) ? 'Inscrit ✔' : 'Participer'}</button>
+                  {activeEvent.attendees?.[0]?.name === user.name && <button onClick={() => deleteEvent(activeEvent.id)} className="bg-red-500/20 text-red-500 p-5 rounded-3xl hover:bg-red-500 hover:text-white transition-all">🗑️</button>}
                 </div>
               </div>
             </div>
-            {/* Right Chat Column */}
-            <div className="md:w-1/2 flex flex-col bg-[#0b0118] border-l border-white/5">
+            {/* Colonne droite (Chat fixe) */}
+            <div className="md:w-1/2 flex flex-col bg-[#0b0118] border-l border-white/5 h-full overflow-hidden">
               <div className="p-8 border-b border-white/5 font-black uppercase text-xs tracking-widest text-[#00F0FF]">Live Discussion</div>
               <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
                 {(activeEvent.comments || []).map((c, i) => (
@@ -213,53 +246,42 @@ function App() {
                 <div ref={chatEndRef} />
               </div>
               <div className="p-8 bg-white/5 border-t border-white/5 flex gap-3">
-                <input className="bg-transparent flex-1 font-bold outline-none text-sm text-white" placeholder="Message the crew..." value={commentInput} onChange={e => setCommentInput(e.target.value)} onKeyPress={ev => ev.key === 'Enter' && postComment(activeEvent)} />
-                <button onClick={() => postComment(activeEvent)} className="bg-[#D1FF4B] text-black font-black px-8 py-4 rounded-2xl uppercase text-[10px] tracking-widest hover:scale-95 transition-all">Send</button>
+                <input className="bg-transparent flex-1 font-bold outline-none text-sm text-white" placeholder="Message..." value={commentInput} onChange={e => setCommentInput(e.target.value)} onKeyPress={ev => ev.key === 'Enter' && postComment(activeEvent)} />
+                <button onClick={() => postComment(activeEvent)} className="bg-[#D1FF4B] text-black font-black px-8 py-4 rounded-2xl uppercase text-[10px] tracking-widest">OK</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- CREATE EVENT MODAL WITH RESTORED GIF SEARCH --- */}
+      {/* CREATE EVENT MODAL (Multi-event supporté) */}
       {selectedDay && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center p-4" onClick={() => setSelectedDay(null)}>
           <div className="bg-[#1a0b2e] border-2 border-[#D1FF4B] p-10 rounded-[50px] w-full max-w-xl max-h-[90vh] overflow-y-auto custom-scrollbar shadow-neon" onClick={e => e.stopPropagation()}>
-             <h3 className="text-3xl font-black mb-8 text-[#D1FF4B] uppercase italic text-center">Broadcast Vibe</h3>
+             <h3 className="text-3xl font-black mb-8 text-[#D1FF4B] uppercase italic text-center">Nouveau Bail</h3>
              <div className="space-y-4 mb-10">
-               <input className="input-field" placeholder="Vibe Name" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
+               <input className="input-field" placeholder="Nom du bail" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
                <div className="grid grid-cols-2 gap-4">
-                 <input className="input-field" placeholder="Price" value={form.price} onChange={e => setForm({...form, price: e.target.value})} />
-                 <input className="input-field" placeholder="Place" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
+                 <input className="input-field" placeholder="Prix" value={form.price} onChange={e => setForm({...form, price: e.target.value})} />
+                 <input className="input-field" placeholder="Lieu" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
                </div>
                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white/5 p-4 rounded-2xl border border-white/10 text-center"><p className="text-[8px] font-black uppercase text-[#00F0FF] mb-2 tracking-widest">Hour</p><input type="time" className="bg-transparent font-black w-full text-center outline-none text-white" value={form.time} onChange={e => setForm({...form, time: e.target.value})} /></div>
+                  <div className="bg-white/5 p-4 rounded-2xl border border-white/10 text-center"><p className="text-[8px] font-black uppercase text-[#00F0FF] mb-2 tracking-widest">Heure</p><input type="time" className="bg-transparent font-black w-full text-center outline-none text-white" value={form.time} onChange={e => setForm({...form, time: e.target.value})} /></div>
                   <div className="bg-white/5 p-4 rounded-2xl border border-white/10 text-center"><p className="text-[8px] font-black uppercase text-[#00F0FF] mb-2 tracking-widest">Date</p><p className="font-black text-sm text-white">{format(selectedDay, 'dd MMM')}</p></div>
                </div>
-               <textarea className="input-field h-24 resize-none" placeholder="The details..." value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
+               <textarea className="input-field h-24 resize-none" placeholder="Description..." value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
                
-               {/* --- RESTORED GIPHY SEARCH SECTION --- */}
                <div className="bg-white/5 p-5 rounded-[30px] border border-white/10 space-y-4">
-                 <p className="text-[10px] font-black uppercase text-[#00F0FF] mb-2 tracking-widest text-center">Select Visual Vibe (GIF)</p>
-                 <input className="input-field mb-4" placeholder="Search GIF theme (ex: Pool party)" value={gifSearch} onChange={e => searchGiphy(e.target.value)} />
+                 <p className="text-[10px] font-black uppercase text-[#00F0FF] mb-2 tracking-widest text-center">Choisir un GIF</p>
+                 <input className="input-field mb-4" placeholder="Rechercher..." value={gifSearch} onChange={e => searchGiphy(e.target.value)} />
                  <div className="grid grid-cols-3 gap-2">
                    {gifResults.map(g => (
-                     <img 
-                       key={g.id} 
-                       src={g.images.fixed_height_small.url} 
-                       onClick={() => setSelectedGif(g.images.fixed_height.url)} 
-                       className={`h-16 w-full object-cover rounded-xl cursor-pointer border-2 transition-all ${selectedGif === g.images.fixed_height.url ? 'border-[#D1FF4B]' : 'border-transparent opacity-40 hover:opacity-100'}`} 
-                       alt="gif vibe"
-                     />
+                     <img key={g.id} src={g.images.fixed_height_small.url} onClick={() => setSelectedGif(g.images.fixed_height.url)} className={`h-16 w-full object-cover rounded-xl cursor-pointer border-2 transition-all ${selectedGif === g.images.fixed_height.url ? 'border-[#D1FF4B]' : 'border-transparent opacity-40 hover:opacity-100'}`} alt="gif" />
                    ))}
                  </div>
                </div>
-               {/* -------------------------------------- */}
-
-               {editingEventId && <input className="input-field" placeholder="Recap Photo URL (optional)" value={form.recap_url} onChange={e => setForm({...form, recap_url: e.target.value})} />}
              </div>
-             <button onClick={handleSaveEvent} className="w-full bg-[#D1FF4B] text-black font-black py-6 rounded-[30px] uppercase text-lg tracking-widest shadow-neon hover:scale-95 transition-transform">Launch Vibe</button>
-             <button onClick={() => setSelectedDay(null)} className="w-full mt-4 text-[10px] opacity-30 uppercase font-black text-center">Cancel</button>
+             <button onClick={handleSaveEvent} className="w-full bg-[#D1FF4B] text-black font-black py-6 rounded-[30px] uppercase text-lg tracking-widest shadow-neon">Lancer le Bail</button>
           </div>
         </div>
       )}
@@ -270,15 +292,15 @@ function App() {
            <div className="bg-[#1a0b2e] border-2 border-[#D1FF4B] p-10 rounded-[50px] w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
               <div className="flex flex-col items-center gap-8 text-center">
                 <img src={user.avatar} className="w-32 h-32 rounded-full border-4 border-[#FF2E95] shadow-2xl" alt="preview" />
-                <input className="input-field text-center font-black uppercase text-xl" value={user.name} onChange={e => setUser({...user, name: e.target.value, avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${e.target.value}`})} placeholder="Username" />
-                <textarea className="input-field h-24 resize-none text-center" value={user.bio} onChange={e => setUser({...user, bio: e.target.value})} placeholder="Vibe curator bio..." />
-                <button onClick={() => setIsEditingProfile(false)} className="w-full bg-[#D1FF4B] text-black font-black py-5 rounded-[25px] uppercase tracking-widest hover:scale-95 transition-transform">Update Identity</button>
+                <input className="input-field text-center font-black uppercase text-xl" value={user.name} onChange={e => setUser({...user, name: e.target.value, avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${e.target.value}`})} placeholder="Prénom" />
+                <textarea className="input-field h-24 resize-none text-center" value={user.bio} onChange={e => setUser({...user, bio: e.target.value})} placeholder="Ma bio..." />
+                <button onClick={() => setIsEditingProfile(false)} className="w-full bg-[#D1FF4B] text-black font-black py-5 rounded-[25px] uppercase tracking-widest">Enregistrer</button>
               </div>
            </div>
         </div>
       )}
 
-      <style>{`.shadow-neon { box-shadow: 0 0 20px rgba(209,255,75,0.3); } .custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #D1FF4B; border-radius: 10px; } .input-field { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 25px; padding: 18px; font-weight: bold; color: white; width: 100%; outline: none; transition: all 0.3s; } .input-field:focus { border-color: #00F0FF; background: rgba(255,255,255,0.08); }`}</style>
+      <style>{`.shadow-neon { box-shadow: 0 0 20px rgba(209,255,75,0.3); } .custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #D1FF4B; border-radius: 10px; } .input-field { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 25px; padding: 18px; font-weight: bold; color: white; width: 100%; outline: none; transition: all 0.3s; }`}</style>
     </div>
   )
 }
